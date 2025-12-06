@@ -12,6 +12,7 @@ Purpose: Understanding the mathematical foundations of audio processing
 
 import numpy as np
 from scipy.io import wavfile
+import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -374,6 +375,185 @@ print(f"        Frequency range: 0 Hz to {freq_bins[-1]:.1f} Hz")
 print(f"        First 5 frequency bins (Hz): {freq_bins[:5]}")
 
 # =============================================================================
+# STEP 3.4: MEL FILTER BANKS (MFCC EXTENSION)
+# =============================================================================
+print("\n" + "=" * 80)
+print("STEP 3.4: MEL FILTER BANKS")
+print("=" * 80)
+
+print(f"\n[MATH CONCEPT - MEL SCALE]:")
+print(f"  • Formula: Mel(f) = 2595 × log10(1 + f/700)")
+print(f"  • Purpose: Convert linear frequency to perceptual Mel scale")
+print(f"  • Reason: Human hearing is more sensitive to changes at low frequencies")
+print(f"  • Filter Banks: 40 triangular filters spanning frequency range")
+
+# Parameters for Mel Filter Banks
+NUM_MEL_FILTERS = 40
+NUM_MFCC_COEFFS = 13
+
+def hz_to_mel(hz):
+    """
+    Convert frequency in Hz to Mel scale
+    
+    Math: Mel(f) = 2595 × log10(1 + f/700)
+    """
+    return 2595 * np.log10(1 + hz / 700)
+
+def mel_to_hz(mel):
+    """
+    Convert Mel scale back to Hz
+    
+    Math: f = 700 × (10^(Mel/2595) - 1)
+    """
+    return 700 * (10 ** (mel / 2595) - 1)
+
+def create_mel_filterbank(num_filters, nfft, sample_rate, low_freq=0, high_freq=None):
+    """
+    Manually create Mel filter bank (triangular filters)
+    
+    Math: Creates overlapping triangular filters in Mel scale
+    """
+    if high_freq is None:
+        high_freq = sample_rate / 2
+    
+    # Convert Hz to Mel
+    low_mel = hz_to_mel(low_freq)
+    high_mel = hz_to_mel(high_freq)
+    
+    # Create num_filters+2 equally spaced points in Mel scale
+    mel_points = np.linspace(low_mel, high_mel, num_filters + 2)
+    
+    # Convert back to Hz
+    hz_points = mel_to_hz(mel_points)
+    
+    # Convert Hz to FFT bin numbers
+    bin_points = np.floor((nfft + 1) * hz_points / sample_rate).astype(int)
+    
+    # Create filter bank matrix
+    num_fft_bins = nfft // 2 + 1
+    filterbank = np.zeros((num_filters, num_fft_bins))
+    
+    # Create triangular filters
+    for m in range(1, num_filters + 1):
+        left = bin_points[m - 1]    # Left edge
+        center = bin_points[m]       # Peak
+        right = bin_points[m + 1]    # Right edge
+        
+        # Rising slope
+        for k in range(left, center):
+            if center != left:
+                filterbank[m - 1, k] = (k - left) / (center - left)
+        
+        # Falling slope
+        for k in range(center, right):
+            if right != center:
+                filterbank[m - 1, k] = (right - k) / (right - center)
+    
+    return filterbank
+
+# Create Mel filter bank
+print(f"\n[3.4.1] Creating Mel Filter Bank...")
+mel_filterbank = create_mel_filterbank(
+    num_filters=NUM_MEL_FILTERS,
+    nfft=FRAME_SIZE,
+    sample_rate=sample_rate,
+    low_freq=0,
+    high_freq=sample_rate / 2
+)
+
+print(f"        Filter Bank Shape: {mel_filterbank.shape}")
+print(f"        Number of Filters: {NUM_MEL_FILTERS}")
+print(f"        Frequency Range: 0 Hz to {sample_rate/2:.1f} Hz (Nyquist)")
+
+# Apply Mel filter bank to power spectrum
+print(f"\n[3.4.2] Applying Mel Filters to Power Spectrum...")
+print(f"        Power Spectrum Shape: {power_spectrum.shape}")
+print(f"        Operation: Matrix multiplication (frames × filters)")
+
+# Filter bank energies = Power Spectrum × Mel Filter Bank^T
+filter_bank_energies = np.dot(power_spectrum, mel_filterbank.T)
+
+print(f"        Filter Bank Energies Shape: {filter_bank_energies.shape}")
+print(f"        Result: {filter_bank_energies.shape[0]} frames × {NUM_MEL_FILTERS} Mel bands")
+print(f"        ✓ Converted from linear to Mel frequency scale")
+
+# =============================================================================
+# STEP 3.5: LOG MEL SPECTRUM
+# =============================================================================
+print("\n" + "=" * 80)
+print("STEP 3.5: LOG MEL SPECTRUM")
+print("=" * 80)
+
+print(f"\n[MATH CONCEPT - LOGARITHMIC COMPRESSION]:")
+print(f"  • Formula: log(E + ε) where E is energy, ε prevents log(0)")
+print(f"  • Purpose: Compress dynamic range (human hearing is logarithmic)")
+print(f"  • Effect: Makes quiet sounds more prominent, loud sounds less dominant")
+print(f"  • Epsilon (ε): Small value to avoid log(0) = -infinity")
+
+print(f"\n[3.5.1] Applying Logarithm to Filter Bank Energies...")
+
+# Add small epsilon to prevent log(0)
+epsilon = 1e-10
+log_mel_spectrum = np.log(filter_bank_energies + epsilon)
+
+print(f"        Formula used: log(energy + {epsilon})")
+print(f"        Before log - Range: [{filter_bank_energies.min():.6f}, {filter_bank_energies.max():.6f}]")
+print(f"        After log  - Range: [{log_mel_spectrum.min():.6f}, {log_mel_spectrum.max():.6f}]")
+print(f"        ✓ Logarithmic compression applied")
+
+# =============================================================================
+# STEP 3.6: DCT (DISCRETE COSINE TRANSFORM) - MFCC EXTRACTION
+# =============================================================================
+print("\n" + "=" * 80)
+print("STEP 3.6: DCT (DISCRETE COSINE TRANSFORM) - MFCC")
+print("=" * 80)
+
+print(f"\n[MATH CONCEPT - DCT]:")
+print(f"  • Formula: MFCC[n] = Σ log_Mel[k] × cos(π×n×(k+0.5)/K)")
+print(f"  • n: MFCC coefficient index (0 to 12 for 13 coefficients)")
+print(f"  • k: Mel filter bank index (0 to {NUM_MEL_FILTERS-1})")
+print(f"  • K: Total number of Mel filters ({NUM_MEL_FILTERS})")
+print(f"  • Purpose: De-correlate Mel coefficients, compress to fewer features")
+
+def manual_dct(signal, num_coeffs):
+    """
+    Manually implement DCT Type-II (used in MFCC)
+    
+    Math: DCT[n] = Σ signal[k] × cos(π × n × (k + 0.5) / K)
+          for n = 0, 1, ..., num_coeffs-1
+          for k = 0, 1, ..., K-1
+    """
+    num_frames, num_filters = signal.shape
+    dct_coeffs = np.zeros((num_frames, num_coeffs))
+    
+    for n in range(num_coeffs):
+        for k in range(num_filters):
+            # DCT-II formula
+            dct_basis = np.cos(np.pi * n * (k + 0.5) / num_filters)
+            dct_coeffs[:, n] += signal[:, k] * dct_basis
+    
+    return dct_coeffs
+
+print(f"\n[3.6.1] Applying DCT to Log Mel Spectrum...")
+print(f"        Input: {log_mel_spectrum.shape[0]} frames × {NUM_MEL_FILTERS} Mel bands")
+print(f"        Extracting first {NUM_MFCC_COEFFS} MFCC coefficients per frame")
+
+# Apply DCT manually
+mfcc_features = manual_dct(log_mel_spectrum, NUM_MFCC_COEFFS)
+
+print(f"\n[3.6.2] MFCC Features Extracted")
+print(f"        Output Shape: {mfcc_features.shape}")
+print(f"        {mfcc_features.shape[0]} frames × {NUM_MFCC_COEFFS} MFCC coefficients")
+print(f"        Frame 0 MFCCs (first 5): {mfcc_features[0, :5]}")
+print(f"        ✓ Full MFCC pipeline complete!")
+
+print(f"\n[3.6.3] Feature Compression Summary")
+print(f"        Original: {power_spectrum.shape[1]} frequency bins")
+print(f"        After Mel Filtering: {NUM_MEL_FILTERS} Mel bands")
+print(f"        After DCT: {NUM_MFCC_COEFFS} MFCC coefficients")
+print(f"        Compression Ratio: {power_spectrum.shape[1] / NUM_MFCC_COEFFS:.1f}:1")
+
+# =============================================================================
 # STEP 4: ACOUSTIC & LANGUAGE MODELS (CONCEPTUAL EXPLANATION)
 # =============================================================================
 print("\n" + "=" * 80)
@@ -471,22 +651,28 @@ Step 2: Audio Cleaning
         ✓ Silence Removal: Dynamic threshold ({SILENCE_THRESHOLD_RATIO*100}% of mean energy)
         ✓ Removed {removed_count} frames ({removed_count/(len(audio_denoised)//FRAME_SIZE)*100:.1f}%)
 
-Step 3: Feature Extraction
+Step 3: Feature Extraction (FULL MFCC PIPELINE)
         ✓ Pre-emphasis Filter (α={PRE_EMPHASIS_COEF})
         ✓ Framing: {len(frames)} frames ({FRAME_SIZE/sample_rate*1000:.1f}ms each)
         ✓ Windowing: Hamming window applied
         ✓ FFT: {power_spectrum.shape[1]} frequency bins per frame
+        ✓ Mel Filter Banks: {NUM_MEL_FILTERS} triangular filters
+        ✓ Log Mel Spectrum: Logarithmic compression applied
+        ✓ DCT: Extracted {NUM_MFCC_COEFFS} MFCC coefficients per frame
+        ✓ Final MFCC Output: {mfcc_features.shape}
 
 Step 4: Models (Conceptual)
-        ✓ Acoustic Model: Features → Phonemes/Words
+        ✓ Acoustic Model: MFCC Features → Phonemes/Words
         ✓ Language Model: Context → Final Transcription
 
 Step 5: Output
-        ✓ Saved to: {OUTPUT_FILE}
-        ✓ Sample Rate: {sample_rate} Hz (matches processed audio)
+        ✓ Audio saved to: {OUTPUT_FILE}
+        ✓ MFCC features ready for acoustic model input
+        ✓ Shape: {mfcc_features.shape[0]} frames × {NUM_MFCC_COEFFS} coefficients
 
 All steps implemented MANUALLY from scratch using only NumPy & SciPy!
 No librosa, noisereduce, or torchaudio used.
+Full MFCC extraction pipeline complete!
 """)
 
 print("=" * 80)
@@ -539,5 +725,47 @@ This script demonstrates SIGNAL PREPROCESSING and FEATURE EXTRACTION.
 This educational script shows the MATHEMATICAL FOUNDATIONS that prepare
 audio data BEFORE it enters those complex neural network systems.
 """)
+
+print("=" * 80)
+
+
+# ============================================================================
+# STEP 6: VISUALIZATION
+# ============================================================================
+
+print("\n" + "=" * 80)
+print("STEP 6: VISUALIZING MFCC FEATURES")
+print("=" * 80)
+
+# Transpose the MFCC matrix for proper visualization
+# Original shape: (num_frames, num_coefficients) = (60960, 13)
+# Transposed shape: (num_coefficients, num_frames) = (13, 60960)
+mfcc_transposed = mfcc_features.T
+
+print(f"\n📊 MFCC Matrix for Visualization:")
+print(f"  - Original shape: {mfcc_features.shape} (frames × coefficients)")
+print(f"  - Transposed shape: {mfcc_transposed.shape} (coefficients × frames)")
+print(f"  - Value range: [{mfcc_transposed.min():.3f}, {mfcc_transposed.max():.3f}]")
+
+# Create the MFCC spectrogram visualization
+plt.figure(figsize=(12, 6))
+img = plt.imshow(mfcc_transposed, aspect='auto', origin='lower', cmap='viridis')
+
+# Add colorbar
+plt.colorbar(img, label='MFCC Magnitude')
+
+# Add labels and title
+plt.xlabel("Time Frames", fontsize=12)
+plt.ylabel("MFCC Coefficients", fontsize=12)
+plt.title("MFCC Spectrogram", fontsize=14, fontweight='bold')
+
+# Save the figure
+output_image_path = "mfcc_output.png"
+plt.savefig(output_image_path, dpi=300, bbox_inches='tight')
+print(f"\n💾 MFCC spectrogram saved to: {output_image_path}")
+
+# Display the plot
+print("\n🎨 Displaying MFCC visualization...")
+plt.show()
 
 print("=" * 80)
